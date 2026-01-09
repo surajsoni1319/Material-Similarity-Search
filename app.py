@@ -15,30 +15,51 @@ st.title("🔍 Material Similarity Search")
 st.caption("Duplicate material prevention & intelligent search")
 
 # -------------------------------
-# Text Cleaning
+# Text Cleaning Function
 # -------------------------------
 def clean_text(text):
     if pd.isna(text):
         return ""
-    text = text.upper()
+    text = str(text).upper()
     text = re.sub(r"[^A-Z0-9 ]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 # -------------------------------
-# Load Dataset (Cached)
+# Upload Excel File
+# -------------------------------
+uploaded_file = st.file_uploader(
+    "📤 Upload Material Master Excel File",
+    type=["xlsx"]
+)
+
+if uploaded_file is None:
+    st.info("Please upload the material master Excel file to continue.")
+    st.stop()
+
+# -------------------------------
+# Load & Prepare Data (Cached)
 # -------------------------------
 @st.cache_data
-def load_data():
-    df = pd.read_excel("MARA 30.12.25.xlsx")
+def load_data(file):
+    df = pd.read_excel(file)
+
+    # IMPORTANT: update this if column name differs
     DESC_COL = "Material Description"
+
+    if DESC_COL not in df.columns:
+        st.error(f"Column '{DESC_COL}' not found in uploaded file.")
+        st.stop()
+
     df["CLEAN_DESC"] = df[DESC_COL].apply(clean_text)
     return df, DESC_COL
 
-df, DESC_COL = load_data()
+df, DESC_COL = load_data(uploaded_file)
+
+st.success(f"✅ Loaded {len(df):,} materials successfully")
 
 # -------------------------------
-# Similarity Logic (Python Std Lib)
+# Similarity Logic
 # -------------------------------
 def similarity(a, b):
     return SequenceMatcher(None, a, b).ratio() * 100
@@ -56,6 +77,7 @@ def find_similar_materials(search_term, df, top_n=20, min_score=60):
             })
 
     result_df = pd.DataFrame(results)
+
     if not result_df.empty:
         result_df = result_df.sort_values(
             by="Similarity %",
@@ -65,17 +87,17 @@ def find_similar_materials(search_term, df, top_n=20, min_score=60):
     return result_df
 
 # -------------------------------
-# Sidebar
+# Sidebar Controls
 # -------------------------------
-st.sidebar.header("⚙️ Settings")
+st.sidebar.header("⚙️ Search Settings")
 top_n = st.sidebar.slider("Top Results", 5, 50, 20)
 min_score = st.sidebar.slider("Minimum Similarity %", 50, 90, 60)
 
 # -------------------------------
-# UI
+# Search UI
 # -------------------------------
 search_term = st.text_input(
-    "Enter Material Name / Keyword",
+    "🔎 Enter Material Name / Keyword",
     placeholder="Example: PIN, BOLT, MOTOR, BEARING"
 )
 
@@ -89,18 +111,21 @@ if search_term:
         )
 
     if result_df.empty:
-        st.warning("No similar materials found.")
+        st.warning("No similar materials found above the selected threshold.")
     else:
         st.success(f"Found {len(result_df)} similar materials")
         st.dataframe(result_df, use_container_width=True)
 
         csv = result_df.to_csv(index=False).encode("utf-8")
         st.download_button(
-            "⬇️ Download Results",
+            "⬇️ Download Results as CSV",
             csv,
             "material_similarity_results.csv",
             "text/csv"
         )
 
+# -------------------------------
+# Footer
+# -------------------------------
 st.markdown("---")
 st.caption("🚀 Star Cement | Material Master Intelligence")
