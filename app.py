@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import re
 from difflib import SequenceMatcher
+import openpyxl  # ensures dependency is loaded
 
-# -------------------------------
+# --------------------------------------------------
 # App Configuration
-# -------------------------------
+# --------------------------------------------------
 st.set_page_config(
     page_title="Material Similarity Search | Star Cement",
     layout="wide"
@@ -14,9 +15,9 @@ st.set_page_config(
 st.title("🔍 Material Similarity Search")
 st.caption("Duplicate material prevention & intelligent search")
 
-# -------------------------------
+# --------------------------------------------------
 # Text Cleaning Function
-# -------------------------------
+# --------------------------------------------------
 def clean_text(text):
     if pd.isna(text):
         return ""
@@ -25,11 +26,11 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-# -------------------------------
+# --------------------------------------------------
 # Upload Excel File
-# -------------------------------
+# --------------------------------------------------
 uploaded_file = st.file_uploader(
-    "📤 Upload Material Master Excel File",
+    "📤 Upload Material Master Excel File (.xlsx)",
     type=["xlsx"]
 )
 
@@ -37,30 +38,32 @@ if uploaded_file is None:
     st.info("Please upload the material master Excel file to continue.")
     st.stop()
 
-# -------------------------------
+# --------------------------------------------------
 # Load & Prepare Data (Cached)
-# -------------------------------
-@st.cache_data
+# --------------------------------------------------
+@st.cache_data(show_spinner=False)
 def load_data(file):
-    df = pd.read_excel(file)
+    df = pd.read_excel(file, engine="openpyxl")
 
-    # IMPORTANT: update this if column name differs
-    DESC_COL = "Material Description"
+    DESC_COL = "Material Description"  # 🔴 update only if column name differs
 
     if DESC_COL not in df.columns:
-        st.error(f"Column '{DESC_COL}' not found in uploaded file.")
-        st.stop()
+        raise ValueError(f"Required column '{DESC_COL}' not found in file.")
 
     df["CLEAN_DESC"] = df[DESC_COL].apply(clean_text)
     return df, DESC_COL
 
-df, DESC_COL = load_data(uploaded_file)
+try:
+    df, DESC_COL = load_data(uploaded_file)
+    st.success(f"✅ Loaded {len(df):,} materials successfully")
+except Exception as e:
+    st.error("Failed to load Excel file.")
+    st.code(str(e))
+    st.stop()
 
-st.success(f"✅ Loaded {len(df):,} materials successfully")
-
-# -------------------------------
+# --------------------------------------------------
 # Similarity Logic
-# -------------------------------
+# --------------------------------------------------
 def similarity(a, b):
     return SequenceMatcher(None, a, b).ratio() * 100
 
@@ -86,16 +89,16 @@ def find_similar_materials(search_term, df, top_n=20, min_score=60):
 
     return result_df
 
-# -------------------------------
+# --------------------------------------------------
 # Sidebar Controls
-# -------------------------------
+# --------------------------------------------------
 st.sidebar.header("⚙️ Search Settings")
 top_n = st.sidebar.slider("Top Results", 5, 50, 20)
-min_score = st.sidebar.slider("Minimum Similarity %", 50, 90, 60)
+min_score = st.sidebar.slider("Minimum Similarity %", 50, 95, 60)
 
-# -------------------------------
+# --------------------------------------------------
 # Search UI
-# -------------------------------
+# --------------------------------------------------
 search_term = st.text_input(
     "🔎 Enter Material Name / Keyword",
     placeholder="Example: PIN, BOLT, MOTOR, BEARING"
@@ -124,8 +127,8 @@ if search_term:
             "text/csv"
         )
 
-# -------------------------------
+# --------------------------------------------------
 # Footer
-# -------------------------------
+# --------------------------------------------------
 st.markdown("---")
-st.caption("🚀 Star Cement | Material Master Intelligence")
+st.caption("🚀 Star Cement | Material Master Similarity Automation")
