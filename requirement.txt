@@ -1,4 +1,4 @@
-streamlit 
-pandas 
-rapidfuzz 
+streamlit
+pandas
+rapidfuzz
 openpyxl
