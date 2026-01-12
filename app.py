@@ -1,134 +1,138 @@
 import streamlit as st
 import pandas as pd
 import re
-from difflib import SequenceMatcher
-import openpyxl  # ensures dependency is loaded
+from rapidfuzz import fuzz
 
 # --------------------------------------------------
-# App Configuration
+# Streamlit Page Config
 # --------------------------------------------------
 st.set_page_config(
-    page_title="Material Similarity Search | Star Cement",
+    page_title="Material Similarity Search",
     layout="wide"
 )
 
 st.title("🔍 Material Similarity Search")
-st.caption("Duplicate material prevention & intelligent search")
+st.write("Search similar materials from the master list with similarity percentage.")
 
 # --------------------------------------------------
-# Text Cleaning Function
+# Cleaning Functions
 # --------------------------------------------------
-def clean_text(text):
+def basic_clean(text):
     if pd.isna(text):
         return ""
+
     text = str(text).upper()
-    text = re.sub(r"[^A-Z0-9 ]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[–\-/,()]", " ", text)   # normalize separators
+    text = re.sub(r"\s+", " ", text)         # remove extra spaces
+    return text.strip()
+
+
+def load_cleaning_rules(path):
+    rules_df = pd.read_excel(path)
+    return dict(zip(rules_df["FIND"], rules_df["REPLACE"]))
+
+
+def apply_rules(text, rules_dict):
+    for find, replace in rules_dict.items():
+        text = re.sub(rf"\b{find}\b", replace, text)
     return text
 
-# --------------------------------------------------
-# Upload Excel File
-# --------------------------------------------------
-uploaded_file = st.file_uploader(
-    "📤 Upload Material Master Excel File (.xlsx)",
-    type=["xlsx"]
-)
 
-if uploaded_file is None:
-    st.info("Please upload the material master Excel file to continue.")
-    st.stop()
+def clean_text(text, rules_dict):
+    text = basic_clean(text)
+    text = apply_rules(text, rules_dict)
+    return text
+
 
 # --------------------------------------------------
-# Load & Prepare Data (Cached)
+# Similarity Function
 # --------------------------------------------------
-@st.cache_data(show_spinner=False)
-def load_data(file):
-    df = pd.read_excel(file, engine="openpyxl")
+def similarity_score(a, b):
+    return fuzz.token_set_ratio(a, b)
 
-    DESC_COL = "Material Description"  # 🔴 update only if column name differs
 
-    if DESC_COL not in df.columns:
-        raise ValueError(f"Required column '{DESC_COL}' not found in file.")
+# --------------------------------------------------
+# Data Loading (Cached)
+# --------------------------------------------------
+@st.cache_data
+def load_master_data():
+    return pd.read_excel("data/material_master.xlsx")
 
-    df["CLEAN_DESC"] = df[DESC_COL].apply(clean_text)
-    return df, DESC_COL
 
+@st.cache_data
+def load_rules():
+    return load_cleaning_rules("config/cleaning_rules.xlsx")
+
+
+@st.cache_data
+def prepare_master(df, rules):
+    df = df.copy()
+    df["CLEAN_TEXT"] = df["MATERIAL_DESCRIPTION"].apply(
+        lambda x: clean_text(x, rules)
+    )
+    return df
+
+
+# --------------------------------------------------
+# Load Everything
+# --------------------------------------------------
 try:
-    df, DESC_COL = load_data(uploaded_file)
-    st.success(f"✅ Loaded {len(df):,} materials successfully")
+    df_raw = load_master_data()
+    rules = load_rules()
+    df_master = prepare_master(df_raw, rules)
+
+    st.success(f"Loaded {len(df_master)} materials successfully")
+
 except Exception as e:
-    st.error("Failed to load Excel file.")
-    st.code(str(e))
+    st.error("Error loading data. Check file paths and column names.")
     st.stop()
 
-# --------------------------------------------------
-# Similarity Logic
-# --------------------------------------------------
-def similarity(a, b):
-    return SequenceMatcher(None, a, b).ratio() * 100
-
-def find_similar_materials(search_term, df, top_n=20, min_score=60):
-    search_term = clean_text(search_term)
-    results = []
-
-    for _, row in df.iterrows():
-        score = similarity(search_term, row["CLEAN_DESC"])
-        if score >= min_score:
-            results.append({
-                "Material Description": row[DESC_COL],
-                "Similarity %": round(score, 2)
-            })
-
-    result_df = pd.DataFrame(results)
-
-    if not result_df.empty:
-        result_df = result_df.sort_values(
-            by="Similarity %",
-            ascending=False
-        ).head(top_n)
-
-    return result_df
-
-# --------------------------------------------------
-# Sidebar Controls
-# --------------------------------------------------
-st.sidebar.header("⚙️ Search Settings")
-top_n = st.sidebar.slider("Top Results", 5, 50, 20)
-min_score = st.sidebar.slider("Minimum Similarity %", 50, 95, 60)
 
 # --------------------------------------------------
 # Search UI
 # --------------------------------------------------
 search_term = st.text_input(
-    "🔎 Enter Material Name / Keyword",
-    placeholder="Example: PIN, BOLT, MOTOR, BEARING"
+    "Enter material name to search",
+    placeholder="Example: PIN"
 )
 
+min_score = st.slider(
+    "Minimum similarity (%)",
+    min_value=0,
+    max_value=100,
+    value=30
+)
+
+
+# --------------------------------------------------
+# Search Logic
+# --------------------------------------------------
 if search_term:
-    with st.spinner("Searching similar materials..."):
-        result_df = find_similar_materials(
-            search_term,
-            df,
-            top_n=top_n,
-            min_score=min_score
-        )
+    clean_query = clean_text(search_term, rules)
 
-    if result_df.empty:
-        st.warning("No similar materials found above the selected threshold.")
-    else:
-        st.success(f"Found {len(result_df)} similar materials")
-        st.dataframe(result_df, use_container_width=True)
+    df_master["SIMILARITY"] = df_master["CLEAN_TEXT"].apply(
+        lambda x: similarity_score(clean_query, x)
+    )
 
-        csv = result_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "⬇️ Download Results as CSV",
-            csv,
-            "material_similarity_results.csv",
-            "text/csv"
-        )
+    results = (
+        df_master[df_master["SIMILARITY"] >= min_score]
+        .sort_values("SIMILARITY", ascending=False)
+        .head(20)
+    )
 
-# --------------------------------------------------
-# Footer
-# --------------------------------------------------
-st.markdown("---")
-st.caption("🚀 Star Cement | Material Master Similarity Automation")
+    st.subheader("🔎 Matching Results")
+    st.caption(f"Cleaned search term: **{clean_query}**")
+
+    st.dataframe(
+        results[["MATERIAL_DESCRIPTION", "SIMILARITY"]],
+        use_container_width=True
+    )
+
+    # Download button
+    csv = results.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download results",
+        csv,
+        "material_matches.csv",
+        "text/csv"
+    )
