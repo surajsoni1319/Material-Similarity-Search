@@ -3,7 +3,6 @@ import pandas as pd
 import re
 from rapidfuzz import fuzz
 from io import BytesIO
-import plotly.express as px
 
 # --------------------------------------------------
 # CONFIG
@@ -202,17 +201,13 @@ if search_term and (search_button or True):  # Auto-search on type
     if show_stats and len(results) > 0:
         st.markdown("### 📈 Similarity Distribution")
         
-        # Create histogram
-        fig = px.histogram(
-            results, 
-            x="SIMILARITY",
-            nbins=20,
-            title="Distribution of Similarity Scores",
-            labels={"SIMILARITY": "Similarity (%)", "count": "Number of Materials"},
-            color_discrete_sequence=["#1f77b4"]
-        )
-        fig.update_layout(showlegend=False, height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        # Create histogram data
+        bins = pd.cut(results["SIMILARITY"], bins=10)
+        hist_data = results.groupby(bins, observed=True).size().reset_index()
+        hist_data.columns = ["Range", "Count"]
+        
+        # Display as bar chart using Streamlit's native chart
+        st.bar_chart(results["SIMILARITY"], height=250)
     
     # --------------------------------------------------
     # TOP 10 RESULTS
