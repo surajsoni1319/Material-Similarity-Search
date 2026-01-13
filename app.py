@@ -33,7 +33,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🔍 Material Similarity Search")
-st.caption("Search similar materials from SAP MARA master data using fuzzy matching")
 
 # --------------------------------------------------
 # CLEANING FUNCTIONS
