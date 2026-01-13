@@ -65,12 +65,12 @@ min_similarity = st.sidebar.slider(
     "Minimum similarity (%)",
     min_value=0,
     max_value=100,
-    value=30
+    value=50
 )
 
 max_results = st.sidebar.selectbox(
     "Max results to process",
-    [50, 100, 200, 500],
+    [50, 100, 200],
     index=1
 )
 
