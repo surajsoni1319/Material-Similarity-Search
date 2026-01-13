@@ -2,9 +2,18 @@ import streamlit as st
 import pandas as pd
 import re
 from rapidfuzz import fuzz
+from io import BytesIO
 
 # --------------------------------------------------
-# Streamlit Page Config
+# CONFIG
+# --------------------------------------------------
+EXCEL_FILE = "MARA 30.12.25.xlsx"
+
+MATERIAL_CODE_COL = "Material"
+MATERIAL_NAME_COL = "Material Description"
+
+# --------------------------------------------------
+# PAGE SETUP
 # --------------------------------------------------
 st.set_page_config(
     page_title="Material Similarity Search",
@@ -12,127 +21,137 @@ st.set_page_config(
 )
 
 st.title("🔍 Material Similarity Search")
-st.write("Search similar materials from the master list with similarity percentage.")
+st.caption("Search similar materials from SAP MARA master data")
 
 # --------------------------------------------------
-# Cleaning Functions
+# CLEANING FUNCTIONS
 # --------------------------------------------------
-def basic_clean(text):
+def clean_text(text):
     if pd.isna(text):
         return ""
-
     text = str(text).upper()
-    text = re.sub(r"[–\-/,()]", " ", text)   # normalize separators
-    text = re.sub(r"\s+", " ", text)         # remove extra spaces
+    text = re.sub(r"[–\-/,()]", " ", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-
-def load_cleaning_rules(path):
-    rules_df = pd.read_excel(path)
-    return dict(zip(rules_df["FIND"], rules_df["REPLACE"]))
-
-
-def apply_rules(text, rules_dict):
-    for find, replace in rules_dict.items():
-        text = re.sub(rf"\b{find}\b", replace, text)
-    return text
-
-
-def clean_text(text, rules_dict):
-    text = basic_clean(text)
-    text = apply_rules(text, rules_dict)
-    return text
-
-
 # --------------------------------------------------
-# Similarity Function
+# SIMILARITY FUNCTION
 # --------------------------------------------------
 def similarity_score(a, b):
     return fuzz.token_set_ratio(a, b)
 
-
 # --------------------------------------------------
-# Data Loading (Cached)
+# LOAD DATA (CACHED)
 # --------------------------------------------------
 @st.cache_data
-def load_master_data():
-    return pd.read_excel("data/material_master.xlsx")
-
-
-@st.cache_data
-def load_rules():
-    return load_cleaning_rules("config/cleaning_rules.xlsx")
-
-
-@st.cache_data
-def prepare_master(df, rules):
-    df = df.copy()
-    df["CLEAN_TEXT"] = df["MATERIAL_DESCRIPTION"].apply(
-        lambda x: clean_text(x, rules)
-    )
+def load_data():
+    df = pd.read_excel(EXCEL_FILE)
+    df["CLEAN_NAME"] = df[MATERIAL_NAME_COL].apply(clean_text)
     return df
 
-
-# --------------------------------------------------
-# Load Everything
-# --------------------------------------------------
 try:
-    df_raw = load_master_data()
-    rules = load_rules()
-    df_master = prepare_master(df_raw, rules)
-
+    df_master = load_data()
     st.success(f"Loaded {len(df_master)} materials successfully")
-
 except Exception as e:
-    st.error("Error loading data. Check file paths and column names.")
+    st.error("❌ Failed to load Excel file. Check file name or column names.")
     st.stop()
 
-
 # --------------------------------------------------
-# Search UI
+# SIDEBAR CONTROLS
 # --------------------------------------------------
-search_term = st.text_input(
-    "Enter material name to search",
-    placeholder="Example: PIN"
-)
+st.sidebar.header("⚙️ Controls")
 
-min_score = st.slider(
+min_similarity = st.sidebar.slider(
     "Minimum similarity (%)",
     min_value=0,
     max_value=100,
     value=30
 )
 
+max_results = st.sidebar.selectbox(
+    "Max results to process",
+    [50, 100, 200, 500],
+    index=1
+)
 
 # --------------------------------------------------
-# Search Logic
+# SEARCH BAR
+# --------------------------------------------------
+search_term = st.text_input(
+    "🔎 Search Material Name",
+    placeholder="Example: PIN"
+)
+
+# --------------------------------------------------
+# SEARCH LOGIC
 # --------------------------------------------------
 if search_term:
-    clean_query = clean_text(search_term, rules)
 
-    df_master["SIMILARITY"] = df_master["CLEAN_TEXT"].apply(
+    clean_query = clean_text(search_term)
+
+    df_master["SIMILARITY"] = df_master["CLEAN_NAME"].apply(
         lambda x: similarity_score(clean_query, x)
     )
 
     results = (
-        df_master[df_master["SIMILARITY"] >= min_score]
+        df_master[df_master["SIMILARITY"] >= min_similarity]
         .sort_values("SIMILARITY", ascending=False)
-        .head(20)
+        .head(max_results)
     )
 
-    st.subheader("🔎 Matching Results")
+    st.subheader("📊 Matching Results")
     st.caption(f"Cleaned search term: **{clean_query}**")
 
+    # -------------------------------
+    # TOP 10 RESULTS
+    # -------------------------------
+    top_10 = results.head(10)
+
+    st.markdown("### 🔝 Top 10 Matches")
     st.dataframe(
-        results[["MATERIAL_DESCRIPTION", "SIMILARITY"]],
+        top_10[
+            [MATERIAL_CODE_COL, MATERIAL_NAME_COL, "SIMILARITY"]
+        ],
         use_container_width=True
     )
 
-    # Download button
-    csv = results.to_csv(index=False).encode("utf-8")
+    # -------------------------------
+    # SHOW MORE RESULTS
+    # -------------------------------
+    remaining = results.iloc[10:]
+
+    if len(remaining) > 0:
+        with st.expander(f"Show more results ({len(remaining)} items)"):
+            st.dataframe(
+                remaining[
+                    [MATERIAL_CODE_COL, MATERIAL_NAME_COL, "SIMILARITY"]
+                ],
+                use_container_width=True
+            )
+
+    # -------------------------------
+    # DOWNLOAD AS EXCEL
+    # -------------------------------
+    output_df = results[
+        [MATERIAL_CODE_COL, MATERIAL_NAME_COL, "SIMILARITY"]
+    ].copy()
+
+    output_df.rename(columns={
+        MATERIAL_CODE_COL: "Material Code",
+        MATERIAL_NAME_COL: "Material Name",
+        "SIMILARITY": "Similarity (%)"
+    }, inplace=True)
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        output_df.to_excel(writer, index=False, sheet_name="Matches")
+
     st.download_button(
-        "Download results",
-        csv,
-        "material_matches.csv",
-        "text/csv"
+        label="⬇️ Download Matching List (Excel)",
+        data=buffer.getvalue(),
+        file_name="material_similarity_results.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+else:
+    st.info("👆 Enter a material name to start searching")
