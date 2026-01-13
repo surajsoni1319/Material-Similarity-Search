@@ -217,17 +217,20 @@ if search_term and (search_button or True):  # Auto-search on type
     top_10 = results.head(10).copy()
     top_10["Rank"] = range(1, len(top_10) + 1)
     
-    display_cols = ["Rank", MATERIAL_CODE_COL, MATERIAL_NAME_COL, "SIMILARITY"]
+    # Add color indicator based on similarity
+    def get_similarity_color(score):
+        if score >= 90:
+            return "🟢"
+        elif score >= 70:
+            return "🟡"
+        else:
+            return "🟠"
     
-    # Style the dataframe
-    styled_top_10 = top_10[display_cols].style.background_gradient(
-        subset=["SIMILARITY"],
-        cmap="RdYlGn",
-        vmin=min_similarity,
-        vmax=100
-    )
+    top_10["Score"] = top_10["SIMILARITY"].apply(lambda x: f"{get_similarity_color(x)} {x}%")
     
-    st.dataframe(styled_top_10, use_container_width=True, hide_index=True)
+    display_cols = ["Rank", MATERIAL_CODE_COL, MATERIAL_NAME_COL, "Score"]
+    
+    st.dataframe(top_10[display_cols], use_container_width=True, hide_index=True)
     
     # --------------------------------------------------
     # ADDITIONAL RESULTS
